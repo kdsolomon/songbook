@@ -142,7 +142,7 @@ main{padding:0 12px 40px}
   <div class="bar">
     <button class="btn" id="backupBtn">Backup songs</button>
     <button class="btn" id="installBtn" hidden>Install app</button>
-    <button class="btn" id="restoreBtn">Restore backup</button>
+    <button class="btn" id="restoreBtn">Import backup</button>
     <input type="file" id="restoreFile" accept=".json,application/json" hidden>
   </div>
   <div id="msg"></div>
@@ -682,17 +682,21 @@ async function restore(file){
   let data;
   try{data=JSON.parse(await file.text())}catch(e){alert("That file is not a valid backup.");return}
   if(!data||data.app!=="songbook"||!Array.isArray(data.songs)){alert("That file is not a songbook backup.");return}
-  if(!confirm(`Restore ${data.songs.length} added song(s), ${(data.setlists||[]).length} setlist(s) and your edits? Songs with the same ID will be replaced.`))return;
+  const bIds=new Set(BUILTIN.map(x=>x.id));
+  const fresh=data.songs.filter(x=>!bIds.has(x.id));          // songs already inside the app are not copied again
+  const sets=Array.isArray(data.setlists)?data.setlists:[];
+  if(!confirm(`Import ${fresh.length} new song(s) and ${sets.length} setlist(s) from this backup?\n\nYour current songs and setlists are kept. Items with the same ID are updated.`))return;
   try{
-    for(const s of data.songs){
+    for(const s of fresh){
       await persistSong({id:s.id,title:s.title,language:s.language,key:s.key,chords:s.chords||"",blob:dataURLToBlob(s.image)});
     }
-    if(data.overrides&&typeof data.overrides==="object"){overrides=data.overrides;saveOv()}
-    if(Array.isArray(data.setlists)){setlists=data.setlists;saveSets()}
+    if(data.overrides&&typeof data.overrides==="object"){overrides={...overrides,...data.overrides};saveOv()}
+    sets.forEach(n=>{const i=setlists.findIndex(x=>x.id===n.id);if(i>=0)setlists[i]=n;else setlists.push(n)});
+    if(sets.length)saveSets();
     userSongs=(await dbAll()).map(r=>({...r,url:r.blob?URL.createObjectURL(r.blob):r.imageUrl}));
     refresh();renderSets();
-    msg(`Restored ${data.songs.length} song(s).`);
-  }catch(e){msg("Could not restore the backup.")}
+    msg(`Imported ${fresh.length} song(s) and ${sets.length} setlist(s).`);
+  }catch(e){msg("Could not import the backup.")}
 }
 $("backupBtn").addEventListener("click",backup);
 $("restoreBtn").addEventListener("click",()=>$("restoreFile").click());
