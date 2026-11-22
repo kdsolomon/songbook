@@ -214,7 +214,7 @@ const NEW_LANG="__new__";
 let overrides={};
 try{overrides=JSON.parse(localStorage.getItem(OV_KEY)||"{}")}catch(e){}
 const saveOv=()=>{try{localStorage.setItem(OV_KEY,JSON.stringify(overrides))}catch(e){};queueState()};
-let userSongs=[], songs=[], state={q:"",lang:"All",mode:"songs",setId:null,picking:false}, curId=null, editing=null;
+let userSongs=[], songs=[], state={q:"",lang:"All",mode:"songs",setId:null,picking:false,pickQ:""}, curId=null, editing=null;
 const SET_KEY="songbook-setlists-v1";
 let setlists=[]; try{setlists=JSON.parse(localStorage.getItem(SET_KEY)||"[]")}catch(e){}
 const saveSets=()=>{try{localStorage.setItem(SET_KEY,JSON.stringify(setlists))}catch(e){};queueState()};
@@ -544,6 +544,13 @@ function setModeRaw(m){
   [...$("modes").children].forEach(b=>b.classList.toggle("on",b.dataset.m===m));
   if(m==="sets")renderSets();
 }
+function pickListHtml(ids){
+  const q=(state.pickQ||"").trim().toLowerCase();
+  const list=[...songs].filter(s=>!q||[s.title,s.key,s.language].some(v=>String(v||"").toLowerCase().includes(q)))
+    .sort((a,b)=>a.title.localeCompare(b.title,undefined,{sensitivity:"base"}));
+  if(!list.length)return `<div class="empty">No songs match "${esc(state.pickQ)}".</div>`;
+  return list.map(s=>`<label class="pick"><input type="checkbox" data-pick="${esc(s.id)}" ${ids.includes(s.id)?"checked":""}><span>${esc(s.title)}</span></label>`).join("");
+}
 function renderSetsRaw(){
   const box=$("sets");
   const set=curSet();
@@ -563,8 +570,9 @@ function renderSetsRaw(){
   if(!ids.length&&!state.picking) h+=`<div class="empty">No songs yet. Tap "+ Add songs".</div>`;
   h+=ids.map((id,i)=>{const s=songs.find(x=>x.id===id);return `<div class="srow"><span class="n">${i+1}</span><button class="stitle" data-open="${i}">${esc(s.title)}</button><button class="btn sm" data-up="${i}" ${i===0?"disabled":""}>&uarr;</button><button class="btn sm" data-down="${i}" ${i===ids.length-1?"disabled":""}>&darr;</button><button class="btn sm del" data-rm="${i}">&times;</button></div>`}).join("");
   if(state.picking){
-    h+=`<div class="hint" style="margin:10px 0 4px">Tick songs to add them to this setlist:</div>`+
-      [...songs].sort((a,b)=>a.title.localeCompare(b.title,undefined,{sensitivity:"base"})).map(s=>`<label class="pick"><input type="checkbox" data-pick="${esc(s.id)}" ${ids.includes(s.id)?"checked":""}><span>${esc(s.title)}</span></label>`).join("");
+    h+=`<div class="hint" style="margin:10px 0 4px">Search, then tick songs to add them to this setlist:</div>
+    <input id="pickQ" type="search" placeholder="Search title, key or language" autocomplete="off" value="${esc(state.pickQ||"")}" style="width:100%;margin:4px 0 6px;padding:10px 12px;font:inherit;border:1px solid var(--line);border-radius:10px;background:var(--card);color:inherit">
+    <div id="pickList">${pickListHtml(ids)}</div>`;
   }
   box.innerHTML=h;
 }
@@ -589,11 +597,17 @@ $("sets").addEventListener("click",e=>{
   }
   if(t.id==="setShare"){shareSet();return}
   if(t.id==="setPlay"){if(set.songIds.length)startPlay([...set.songIds],0);return}
-  if(t.id==="setAdd"){state.picking=!state.picking;renderSets();return}
+  if(t.id==="setAdd"){state.picking=!state.picking;state.pickQ="";renderSets();return}
   if(t.dataset.open!==undefined){startPlay([...set.songIds],Number(t.dataset.open));return}
   if(t.dataset.up!==undefined){const i=Number(t.dataset.up);setSongs(ids=>{[ids[i-1],ids[i]]=[ids[i],ids[i-1]];return ids});return}
   if(t.dataset.down!==undefined){const i=Number(t.dataset.down);setSongs(ids=>{[ids[i+1],ids[i]]=[ids[i],ids[i+1]];return ids});return}
   if(t.dataset.rm!==undefined){const i=Number(t.dataset.rm);setSongs(ids=>ids.filter((_,k)=>k!==i));return}
+});
+$("sets").addEventListener("input",e=>{
+  if(e.target.id!=="pickQ")return;
+  state.pickQ=e.target.value;
+  const set=curSet();if(!set)return;
+  $("pickList").innerHTML=pickListHtml(existingIds(set.songIds));
 });
 $("sets").addEventListener("change",e=>{
   const c=e.target; if(!c.dataset.pick)return;
