@@ -87,6 +87,9 @@ main{padding:0 12px 40px}
 .btn:disabled{opacity:.4;cursor:default}
 .btn.sm{padding:4px 9px}
 .srow{display:flex;align-items:center;gap:6px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:8px;margin:6px 0}
+.srow .lg{flex:none;font-size:11px;color:var(--mut);border:1px solid var(--line);border-radius:999px;padding:1px 7px}
+.lghead{position:sticky;top:0;background:var(--bg);font-size:12px;font-weight:700;color:var(--acc);text-transform:uppercase;letter-spacing:.04em;padding:10px 2px 4px}
+.lghead span{color:var(--mut);font-weight:400}
 .srow .n{color:var(--mut);width:22px;text-align:right;font-size:13px}
 .srow .stitle{flex:1;min-width:0;text-align:left;border:0;background:none;padding:4px;font-size:15px;font-weight:600;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pick{display:flex;align-items:center;gap:10px;padding:10px;background:var(--card);border:1px solid var(--line);border-radius:10px;margin:5px 0}
@@ -241,7 +244,7 @@ const NEW_LANG="__new__";
 let overrides={};
 try{overrides=JSON.parse(localStorage.getItem(OV_KEY)||"{}")}catch(e){}
 const saveOv=()=>{try{localStorage.setItem(OV_KEY,JSON.stringify(overrides))}catch(e){};queueState()};
-let userSongs=[], songs=[], state={q:"",lang:"All",mode:"songs",setId:null,picking:false,pickQ:"",renaming:false}, curId=null, editing=null;
+let userSongs=[], songs=[], state={q:"",lang:"All",mode:"songs",setId:null,picking:false,pickQ:"",pickLang:"all",renaming:false}, curId=null, editing=null;
 const SET_KEY="songbook-setlists-v1";
 let setlists=[]; try{setlists=JSON.parse(localStorage.getItem(SET_KEY)||"[]")}catch(e){}
 const saveSets=()=>{try{localStorage.setItem(SET_KEY,JSON.stringify(setlists))}catch(e){};queueState()};
@@ -586,12 +589,30 @@ function setModeRaw(m){
   [...$("modes").children].forEach(b=>b.classList.toggle("on",b.dataset.m===m));
   if(m==="sets")renderSets();
 }
+function langCounts(){
+  const c={};songs.forEach(s=>{const l=s.language||"Other";c[l]=(c[l]||0)+1});
+  return Object.entries(c).sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0]));
+}
+function pickChipsHtml(){
+  const lc=langCounts();
+  return `<button type="button" class="chip ${state.pickLang==="all"?"on":""}" data-pl="all">All (${songs.length})</button>`+
+    lc.map(([l,n])=>`<button type="button" class="chip ${state.pickLang===l?"on":""}" data-pl="${esc(l)}">${esc(l)} (${n})</button>`).join("");
+}
+function langSummary(ids){
+  const c={};ids.forEach(id=>{const s=songs.find(x=>x.id===id);if(s){const l=s.language||"Other";c[l]=(c[l]||0)+1}});
+  return Object.entries(c).sort((a,b)=>b[1]-a[1]).map(([l,n])=>`${n} ${l}`).join(" · ");
+}
 function pickListHtml(ids){
   const q=(state.pickQ||"").trim().toLowerCase();
-  const list=[...songs].filter(s=>!q||[s.title,s.key,s.language].some(v=>String(v||"").toLowerCase().includes(q)))
+  const list=[...songs].filter(s=>(state.pickLang==="all"||(s.language||"Other")===state.pickLang)&&(!q||[s.title,s.key,s.language].some(v=>String(v||"").toLowerCase().includes(q))))
     .sort((a,b)=>a.title.localeCompare(b.title,undefined,{sensitivity:"base"}));
-  if(!list.length)return `<div class="empty">No songs match "${esc(state.pickQ)}".</div>`;
-  return list.map(s=>`<label class="pick"><input type="checkbox" data-pick="${esc(s.id)}" ${ids.includes(s.id)?"checked":""}><span>${esc(s.title)}</span></label>`).join("");
+  if(!list.length)return `<div class="empty">No songs match${state.pickQ?` "${esc(state.pickQ)}"`:""}.</div>`;
+  const row=s=>`<label class="pick"><input type="checkbox" data-pick="${esc(s.id)}" ${ids.includes(s.id)?"checked":""}><span>${esc(s.title)}</span></label>`;
+  // grouped under a heading for each language
+  return langCounts().map(([l])=>{
+    const g=list.filter(s=>(s.language||"Other")===l);
+    return g.length?`<div class="lghead">${esc(l)} <span>${g.length}</span></div>`+g.map(row).join(""):"";
+  }).join("");
 }
 function renderSetsRaw(){
   const box=$("sets");
@@ -600,7 +621,7 @@ function renderSetsRaw(){
     state.setId=null;state.picking=false;state.renaming=false;
     box.innerHTML=`<div class="newset"><input id="newName" placeholder="New setlist, e.g. Sunday service"><button class="btn pri" id="newBtn">Create</button></div>`+
       (setlists.length
-        ? setlists.map(s=>`<button class="row" data-set="${esc(s.id)}"><span class="t">${esc(s.name)}</span><span class="m"><span>${existingIds(s.songIds).length} songs</span></span></button>`).join("")
+        ? setlists.map(s=>`<button class="row" data-set="${esc(s.id)}"><span class="t">${esc(s.name)}</span><span class="m"><span>${existingIds(s.songIds).length} songs${langSummary(existingIds(s.songIds))?" · "+esc(langSummary(existingIds(s.songIds))):""}</span></span></button>`).join("")
         : `<div class="empty">No setlists yet. Create one above, then add songs to it.</div>`);
     return;
   }
@@ -608,12 +629,14 @@ function renderSetsRaw(){
   set.songIds=ids;
   let h=`<div class="dhead"><button class="btn" id="setBack">&larr; All setlists</button><button class="btn" id="setRename">Rename</button><button class="btn del" id="setDel">Delete</button></div>
   ${state.renaming?`<div class="newset"><input id="renameInput" value="${esc(set.name)}" maxlength="80" autocomplete="off"><button class="btn pri" id="renameSave">Save</button><button class="btn" id="renameCancel">Cancel</button></div>`:`<h2 class="sname">${esc(set.name)}</h2>`}
+  ${ids.length?`<div class="hint" style="margin:2px 0 6px">${esc(langSummary(ids))}</div>`:""}
   <div class="setbtns"><button class="btn pri" id="setPlay" ${ids.length?"":"disabled"}>&#9654; Play setlist</button><button class="btn" id="setAdd">${state.picking?"Done adding":"+ Add songs"}</button><button class="btn" id="setShare" ${ids.length?"":"disabled"}>Share</button></div>`;
   if(!ids.length&&!state.picking) h+=`<div class="empty">No songs yet. Tap "+ Add songs".</div>`;
-  h+=ids.map((id,i)=>{const s=songs.find(x=>x.id===id);return `<div class="srow"><span class="n">${i+1}</span><button class="stitle" data-open="${i}">${esc(s.title)}</button><button class="btn sm" data-up="${i}" ${i===0?"disabled":""}>&uarr;</button><button class="btn sm" data-down="${i}" ${i===ids.length-1?"disabled":""}>&darr;</button><button class="btn sm del" data-rm="${i}">&times;</button></div>`}).join("");
+  h+=ids.map((id,i)=>{const s=songs.find(x=>x.id===id);return `<div class="srow"><span class="n">${i+1}</span><button class="stitle" data-open="${i}">${esc(s.title)}</button><span class="lg">${esc(s.language||"")}</span><button class="btn sm" data-up="${i}" ${i===0?"disabled":""}>&uarr;</button><button class="btn sm" data-down="${i}" ${i===ids.length-1?"disabled":""}>&darr;</button><button class="btn sm del" data-rm="${i}">&times;</button></div>`}).join("");
   if(state.picking){
     h+=`<div class="hint" style="margin:10px 0 4px">Search, then tick songs to add them to this setlist:</div>
     <input id="pickQ" type="search" placeholder="Search title, key or language" autocomplete="off" value="${esc(state.pickQ||"")}" style="width:100%;margin:4px 0 6px;padding:10px 12px;font:inherit;border:1px solid var(--line);border-radius:10px;background:var(--card);color:inherit">
+    <div class="chips" id="pickLangs" style="margin:4px 0 6px">${pickChipsHtml()}</div>
     <div id="pickList">${pickListHtml(ids)}</div>`;
   }
   box.innerHTML=h;
@@ -653,11 +676,18 @@ $("sets").addEventListener("click",e=>{
   }
   if(t.id==="setShare"){shareSet();return}
   if(t.id==="setPlay"){if(set.songIds.length)startPlay([...set.songIds],0);return}
-  if(t.id==="setAdd"){state.picking=!state.picking;state.pickQ="";renderSets();return}
+  if(t.id==="setAdd"){state.picking=!state.picking;state.pickQ="";state.pickLang="all";renderSets();return}
   if(t.dataset.open!==undefined){startPlay([...set.songIds],Number(t.dataset.open));return}
   if(t.dataset.up!==undefined){const i=Number(t.dataset.up);setSongs(ids=>{[ids[i-1],ids[i]]=[ids[i],ids[i-1]];return ids});return}
   if(t.dataset.down!==undefined){const i=Number(t.dataset.down);setSongs(ids=>{[ids[i+1],ids[i]]=[ids[i],ids[i+1]];return ids});return}
   if(t.dataset.rm!==undefined){const i=Number(t.dataset.rm);setSongs(ids=>ids.filter((_,k)=>k!==i));return}
+});
+$("sets").addEventListener("click",e=>{
+  const b=e.target.closest("[data-pl]");if(!b)return;
+  state.pickLang=b.dataset.pl;
+  const set=curSet();if(!set)return;
+  $("pickLangs").innerHTML=pickChipsHtml();
+  $("pickList").innerHTML=pickListHtml(existingIds(set.songIds));
 });
 $("sets").addEventListener("input",e=>{
   if(e.target.id!=="pickQ")return;
