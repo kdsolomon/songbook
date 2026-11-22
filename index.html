@@ -214,10 +214,23 @@ const NEW_LANG="__new__";
 let overrides={};
 try{overrides=JSON.parse(localStorage.getItem(OV_KEY)||"{}")}catch(e){}
 const saveOv=()=>{try{localStorage.setItem(OV_KEY,JSON.stringify(overrides))}catch(e){};queueState()};
-let userSongs=[], songs=[], state={q:"",lang:"All",mode:"songs",setId:null,picking:false,pickQ:""}, curId=null, editing=null;
+let userSongs=[], songs=[], state={q:"",lang:"All",mode:"songs",setId:null,picking:false,pickQ:"",renaming:false}, curId=null, editing=null;
 const SET_KEY="songbook-setlists-v1";
 let setlists=[]; try{setlists=JSON.parse(localStorage.getItem(SET_KEY)||"[]")}catch(e){}
 const saveSets=()=>{try{localStorage.setItem(SET_KEY,JSON.stringify(setlists))}catch(e){};queueState()};
+/* setlists that ship with the app: added once per phone, then yours to rename, edit or delete */
+const DEFAULT_SETLISTS=[{"id": "s1795326110683", "name": "Nov 22, 2026 Demonic Dreams Special Sunday", "songIds": ["u1795279960357", "b64", "u1795294330102", "u1795326243955"]}];
+(function seedSetlists(){
+  const KEY="songbook-seeded-sets-v1";let done=[];
+  try{done=JSON.parse(localStorage.getItem(KEY)||"[]")}catch(e){}
+  let changed=false;
+  DEFAULT_SETLISTS.forEach(d=>{
+    if(done.includes(d.id))return;
+    if(!setlists.some(x=>x.id===d.id)){setlists.push(JSON.parse(JSON.stringify(d)));changed=true}
+    done.push(d.id);
+  });
+  try{localStorage.setItem(KEY,JSON.stringify(done));if(changed)localStorage.setItem(SET_KEY,JSON.stringify(setlists))}catch(e){}
+})();
 let playQueue=null, playIdx=-1;
 const msg=s=>{$("msg").textContent=s};
 
@@ -556,7 +569,7 @@ function renderSetsRaw(){
   const box=$("sets");
   const set=curSet();
   if(!set){
-    state.setId=null;state.picking=false;
+    state.setId=null;state.picking=false;state.renaming=false;
     box.innerHTML=`<div class="newset"><input id="newName" placeholder="New setlist, e.g. Sunday service"><button class="btn pri" id="newBtn">Create</button></div>`+
       (setlists.length
         ? setlists.map(s=>`<button class="row" data-set="${esc(s.id)}"><span class="t">${esc(s.name)}</span><span class="m"><span>${existingIds(s.songIds).length} songs</span></span></button>`).join("")
@@ -565,8 +578,8 @@ function renderSetsRaw(){
   }
   const ids=existingIds(set.songIds);
   set.songIds=ids;
-  let h=`<div class="dhead"><button class="btn" id="setBack">&larr; All setlists</button><button class="btn del" id="setDel">Delete</button></div>
-  <h2 class="sname">${esc(set.name)}</h2>
+  let h=`<div class="dhead"><button class="btn" id="setBack">&larr; All setlists</button><button class="btn" id="setRename">Rename</button><button class="btn del" id="setDel">Delete</button></div>
+  ${state.renaming?`<div class="newset"><input id="renameInput" value="${esc(set.name)}" maxlength="80" autocomplete="off"><button class="btn pri" id="renameSave">Save</button><button class="btn" id="renameCancel">Cancel</button></div>`:`<h2 class="sname">${esc(set.name)}</h2>`}
   <div class="setbtns"><button class="btn pri" id="setPlay" ${ids.length?"":"disabled"}>&#9654; Play setlist</button><button class="btn" id="setAdd">${state.picking?"Done adding":"+ Add songs"}</button><button class="btn" id="setShare" ${ids.length?"":"disabled"}>Share</button></div>`;
   if(!ids.length&&!state.picking) h+=`<div class="empty">No songs yet. Tap "+ Add songs".</div>`;
   h+=ids.map((id,i)=>{const s=songs.find(x=>x.id===id);return `<div class="srow"><span class="n">${i+1}</span><button class="stitle" data-open="${i}">${esc(s.title)}</button><button class="btn sm" data-up="${i}" ${i===0?"disabled":""}>&uarr;</button><button class="btn sm" data-down="${i}" ${i===ids.length-1?"disabled":""}>&darr;</button><button class="btn sm del" data-rm="${i}">&times;</button></div>`}).join("");
@@ -577,6 +590,17 @@ function renderSetsRaw(){
   }
   box.innerHTML=h;
 }
+function saveRename(){
+  const set=curSet(),i=$("renameInput");if(!set||!i)return;
+  const n=i.value.trim();
+  if(!n){msg("Please type a name.");return}
+  set.name=n;state.renaming=false;saveSets();renderSets();msg("Setlist renamed.");
+}
+$("sets").addEventListener("keydown",e=>{
+  if(e.target.id!=="renameInput")return;
+  if(e.key==="Enter"){e.preventDefault();saveRename()}
+  else if(e.key==="Escape"){state.renaming=false;renderSets()}
+});
 function setSongs(fn){const set=curSet();if(!set)return;set.songIds=fn(existingIds(set.songIds));saveSets();renderSets()}
 $("modes").addEventListener("click",e=>{const b=e.target.closest("button");if(b)setMode(b.dataset.m)});
 $("sets").addEventListener("click",e=>{
@@ -589,7 +613,10 @@ $("sets").addEventListener("click",e=>{
   }
   if(t.dataset.set){state.setId=t.dataset.set;state.picking=false;renderSets();return}
   if(!set)return;
-  if(t.id==="setBack"){state.setId=null;renderSets();return}
+  if(t.id==="setBack"){state.setId=null;state.renaming=false;renderSets();return}
+  if(t.id==="setRename"){state.renaming=true;renderSets();const i=$("renameInput");if(i){i.focus();i.select()}return}
+  if(t.id==="renameCancel"){state.renaming=false;renderSets();return}
+  if(t.id==="renameSave"){saveRename();return}
   if(t.id==="setDel"){
     if(confirm(`Delete setlist "${set.name}"? The songs themselves are kept.`)){
       setlists=setlists.filter(x=>x.id!==set.id);state.setId=null;saveSets();renderSets();
@@ -837,7 +864,7 @@ function leaveLayer(name){
 function doClose(l){
   if(l==="song")closeSongRaw();
   else if(l==="form")closeFormRaw();
-  else if(l==="set"){state.setId=null;state.picking=false;renderSets()}
+  else if(l==="set"){state.setId=null;state.picking=false;state.renaming=false;renderSets()}
   else if(l==="sets")setModeRaw("songs");
 }
 window.addEventListener("popstate",e=>{
