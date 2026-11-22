@@ -108,6 +108,14 @@ main{padding:0 12px 40px}
 .row{animation:rise .22s ease-out both;transition:transform .12s ease,box-shadow .12s ease,border-color .12s ease}
 .row:hover{border-color:var(--acc)}
 .row:active,.btn:active,.chip:active{transform:scale(.97)}
+.cb{margin:10px 0;border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:var(--card)}
+.cb summary{cursor:pointer;font-weight:600;font-size:14px}
+.cbl{font-size:12px;color:var(--mut);margin:10px 0 4px}
+.bgrid{display:flex;flex-wrap:wrap;gap:6px}
+.bb{border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:8px;padding:7px 10px;min-width:40px;font-size:14px;cursor:pointer}
+.bb.on{background:var(--acc);color:#fff;border-color:var(--acc)}
+.cbprev{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:10px;font-size:15px}
+.cbrowv{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:14px;background:var(--bg);border:1px dashed var(--line);border-radius:8px;padding:8px;white-space:pre;overflow-x:auto;min-height:20px}
 .btn,.chip{transition:transform .12s ease,background-color .2s ease,color .2s ease,border-color .2s ease}
 .chip.on{box-shadow:0 2px 8px rgba(47,111,78,.25)}
 #q{transition:border-color .2s ease,box-shadow .2s ease}
@@ -198,6 +206,25 @@ main{padding:0 12px 40px}
       <textarea id="fchords" placeholder="Chord line above each lyric line, e.g.&#10;G        D       Em&#10;Amazing grace how sweet"></textarea>
     </label>
     <div class="hint">Put chord names on their own line above the lyrics. Chords can be transposed; the photo stays as it is.</div>
+    <details id="cbWrap" class="cb">
+      <summary>Chord builder: tap to add chords, counts and sections</summary>
+      <div class="cbl">Section</div><div class="bgrid" id="cbSec"></div>
+      <div class="cbl">Count above the chord (optional, stays selected)</div><div class="bgrid" id="cbCnt"></div>
+      <div class="cbl">Chords in this song's key (set the Key above)</div><div class="bgrid" id="cbKey"></div>
+      <div class="cbl">Any chord: pick the root</div><div class="bgrid" id="cbRoot"></div>
+      <div class="cbl">Type</div><div class="bgrid" id="cbType"></div>
+      <div class="cbl">Bass note (for slash chords like Am7/G)</div><div class="bgrid" id="cbBass"></div>
+      <div class="cbprev"><span>Chord: <b id="cbPrev">pick a root</b></span><button type="button" class="btn pri" id="cbAdd">Add to row</button></div>
+      <div class="cbl">End of row</div><div class="bgrid" id="cbEnd"></div>
+      <div class="cbl">Current row</div><div class="cbrowv" id="cbRow">Nothing yet</div>
+      <div class="bgrid" style="margin-top:8px">
+        <button type="button" class="btn" id="cbUndo">Undo</button>
+        <button type="button" class="btn" id="cbClear">Clear</button>
+        <button type="button" class="btn pri" id="cbInsert">Insert row</button>
+      </div>
+      <div class="cbl">Quick</div>
+      <div class="bgrid"><button type="button" class="btn" id="cbCopy">Repeat previous row</button><button type="button" class="btn" id="cbNL">Blank line</button></div>
+    </details>
     <div class="err" id="ferr"></div>
     <div class="btns">
       <button type="button" class="btn" id="fc">Cancel</button>
@@ -367,7 +394,7 @@ async function cloudPull(){
 const LABELS=["C","Db","D","Eb","E","F","F#","G","Ab","A","Bb","B"];
 const FLAT_LABELS=new Set(["F","Bb","Eb","Ab","Db"]);
 const IDX={"B#":0,"E#":5,"Cb":11,"Fb":4,C:0,"C#":1,Db:1,D:2,"D#":3,Eb:3,E:4,F:5,"F#":6,Gb:6,G:7,"G#":8,Ab:8,A:9,"A#":10,Bb:10,B:11};
-const CHORD_RE=/^[A-G](?:#|b)?(?:maj|min|m|M|sus|add|dim|aug|dom|\+|-|°|ø|\d|#|b|\(|\))*(?:\/[A-G](?:#|b)?)?$/;
+const CHORD_RE=/^[A-G](?:#|b)?(?:maj|min|m|M|sus|add|dim|aug|dom|\+|-|°|ø|Δ|△|\d|#|b|\(|\))*(?:\/[A-G](?:#|b)?|\/9)?$/;
 const stripWrap=t=>t.replace(/^[(|]+|[)|,]+$/g,"");
 const SHARPS=["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
 const shiftNote=(n,off,flats)=>{const i=(IDX[n]+off+12)%12;return flats?LABELS[i]:SHARPS[i]};
@@ -375,7 +402,7 @@ function xposeChord(c,off,flats){
   const [main,bass]=c.split("/");
   const m=main.match(/^([A-G](?:#|b)?)(.*)$/);
   let out=shiftNote(m[1],off,flats)+m[2];
-  if(bass)out+="/"+shiftNote(bass,off,flats);
+  if(bass)out+="/"+(/^\d/.test(bass)?bass:shiftNote(bass,off,flats));
   return out;
 }
 function xposeText(text,off,flats){
@@ -470,11 +497,12 @@ function openForm(song){
   editing=song||null;
   $("fh").textContent=song?"Edit song":"Add a song";
   $("lfile").style.display=song?"none":"block";
-  $("readBtn").style.display=song?"none":"block";
+  $("readBtn").style.display=(song||!(window.claude&&window.claude.complete))?"none":"block";
   $("fi").value="";$("fname").textContent="Gallery, Files or camera photos all work";
   $("ft").value=song?song.title:"";
   $("fk").value=song?song.key||"":"";
   $("fchords").value=song?song.chords||"":"";
+  if(typeof cbReset==="function"){setTimeout(cbReset,0)}
   fillLangSelect(song?song.language:"English");
   $("ferr").textContent="";
   $("formwrap").hidden=false;
@@ -903,6 +931,88 @@ if("serviceWorker" in navigator&&/^https?:$/.test(location.protocol)){
   window.addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{}));
 }
 try{if(navigator.storage&&navigator.storage.persist)navigator.storage.persist()}catch(e){}
+
+
+/* ---------- chord builder in the editor ---------- */
+const CB={root:null,type:"",bass:null,cnt:"",row:[],end:""};
+const CB_TYPES=[["major",""],["m","m"],["7","7"],["maj7","maj7"],["m7","m7"],["sus2","sus2"],["sus4","sus4"],["add9","add9"],["2","2"],["5","5"],["6","6"],["6/9","6/9"],["9","9"],["13","13"],["dim","dim"],["dim7","dim7"],["aug","aug"],["m7b5","m7b5"]];
+const CB_ROOTS=["C","C#","D","Eb","E","F","F#","G","Ab","A","Bb","B"];
+function cbBtns(id,items,cls){ // items: [label,value]
+  $(id).innerHTML=items.map(([l,v])=>`<button type="button" class="bb" data-v="${esc(v)}">${esc(l)}</button>`).join("");
+}
+function cbChord(){
+  if(!CB.root)return "";
+  const bass=CB.type==="6/9"?null:CB.bass;
+  return CB.root+CB.type+(bass?"/"+bass:"");
+}
+function cbRender(){
+  $("cbPrev").textContent=cbChord()||"pick a root";
+  const mark=(id,val)=>[...$(id).children].forEach(b=>b.classList.toggle("on",b.dataset.v===val&&val!==null));
+  mark("cbRoot",CB.root);mark("cbType",CB.root?CB.type:null);mark("cbBass",CB.bass===null?"none":CB.bass);mark("cbCnt",CB.cnt);mark("cbEnd",CB.end);
+  $("cbRow").textContent=CB.row.length?cbRowText(CB.row,CB.end).join("\n"):"Nothing yet";
+}
+function cbRowText(row,end){
+  const w=row.map(c=>Math.max(String(c.cnt||"").length,c.chord.length)+2);
+  const any=row.some(c=>c.cnt);
+  const counts=any?row.map((c,i)=>String(c.cnt||"-").padEnd(w[i])).join("").trimEnd():null;
+  const chords=row.map((c,i)=>c.chord.padEnd(w[i])).join("").trimEnd()+(end?"  "+end:"");
+  return counts?[counts,chords]:[chords];
+}
+function cbInsertText(text){
+  const ta=$("fchords"),v=ta.value;
+  const a=ta.selectionStart==null?v.length:ta.selectionStart,b=ta.selectionEnd==null?a:ta.selectionEnd;
+  const pre=v.slice(0,a),post=v.slice(b);
+  const block=(pre&&!pre.endsWith("\n")?"\n":"")+text+"\n";
+  ta.value=pre+block+post;
+  const pos=pre.length+block.length;
+  try{ta.setSelectionRange(pos,pos);ta.focus({preventScroll:true})}catch(e){}
+}
+function cbAddChord(ch){if(!ch)return;CB.row.push({chord:ch,cnt:CB.cnt});cbRender()}
+function cbKeyChips(){
+  const k=($("fk").value||"").trim(),m=k.match(/^([A-G](?:#|b)?)(m(?!aj))?/);
+  const box=$("cbKey");
+  if(!m||IDX[m[1]]===undefined){box.innerHTML='<span class="hint">Type the key above (for example G or Am) to see its chords here.</span>';return}
+  const minor=!!m[2],r=IDX[m[1]];
+  const steps=minor?[0,2,3,5,7,8,10]:[0,2,4,5,7,9,11];
+  const qual=minor?["m","dim","","m","m","",""]:["","m","m","","","m","dim"];
+  const flats=minor?["D","G","C","F","Bb","Eb"].includes(m[1]):["F","Bb","Eb","Ab","Db","Gb"].includes(m[1]);
+  const names=flats?LABELS:SHARPS;
+  box.innerHTML=steps.map((st,i)=>{const c=names[(r+st)%12]+qual[i];return `<button type="button" class="bb" data-v="${esc(c)}">${esc(c)}</button>`}).join("");
+}
+function cbReset(){CB.root=null;CB.type="";CB.bass=null;CB.row=[];CB.end="";cbKeyChips();cbRender()}
+(function cbInit(){
+  cbBtns("cbSec",["Intro","Verse","Pre-Chorus","Chorus","Bridge","Interlude","Outro"].map(x=>[x,x]));
+  cbBtns("cbCnt",[["none",""],...["1","2","3","4","6","8","-"].map(x=>[x,x])]);
+  cbBtns("cbRoot",CB_ROOTS.map(x=>[x,x]));
+  cbBtns("cbType",CB_TYPES.map(([l,v])=>[l,v]));
+  cbBtns("cbBass",[["none","none"],...CB_ROOTS.map(x=>[x,x])]);
+  cbBtns("cbEnd",[["none",""],["(x2)","(x2)"],["(x3)","(x3)"],["(x4)","(x4)"]]);
+  const on=(id,fn)=>$(id).addEventListener("click",e=>{const b=e.target.closest("button.bb");if(b)fn(b.dataset.v)});
+  on("cbSec",v=>cbInsertText("["+v+"]"));
+  on("cbCnt",v=>{CB.cnt=v;cbRender()});
+  on("cbKey",v=>cbAddChord(v));
+  on("cbRoot",v=>{CB.root=v;cbRender()});
+  on("cbType",v=>{CB.type=v;if(!CB.root){cbRender();return}cbRender()});
+  on("cbBass",v=>{CB.bass=v==="none"?null:v;cbRender()});
+  on("cbEnd",v=>{CB.end=v;cbRender()});
+  $("cbAdd").addEventListener("click",()=>{const c=cbChord();if(!c){msg("Pick a root note first.");return}cbAddChord(c)});
+  $("cbUndo").addEventListener("click",()=>{CB.row.pop();cbRender()});
+  $("cbClear").addEventListener("click",()=>{CB.row=[];CB.end="";cbRender()});
+  $("cbInsert").addEventListener("click",()=>{
+    if(!CB.row.length){msg("Add at least one chord to the row.");return}
+    cbInsertText(cbRowText(CB.row,CB.end).join("\n"));CB.row=[];CB.end="";cbRender();
+  });
+  $("cbNL").addEventListener("click",()=>cbInsertText(""));
+  $("cbCopy").addEventListener("click",()=>{
+    const ta=$("fchords"),upto=ta.value.slice(0,ta.selectionStart==null?ta.value.length:ta.selectionStart).split("\n");
+    let i=upto.length-1;while(i>=0&&!(upto[i].trim()&&isChordLine(upto[i])&&!isCountLine(upto[i])))i--;
+    if(i<0){msg("No chord row found above the cursor.");return}
+    const lines=(i>0&&isCountLine(upto[i-1]))?[upto[i-1],upto[i]]:[upto[i]];
+    cbInsertText(lines.join("\n"));
+  });
+  $("fk").addEventListener("input",cbKeyChips);
+  cbReset();
+})();
 
 /* ---------- start ---------- */
 (async()=>{
