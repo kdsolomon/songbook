@@ -1,5 +1,5 @@
 // Offline cache. Bump VERSION whenever you change index.html so phones pick up the update.
-const VERSION = "songbook-v9";
+const VERSION = "songbook-v10";
 const FILES = ["./", "./index.html", "./manifest.webmanifest", "./icons/icon-192.png", "./icons/icon-512.png", "./icons/maskable-512.png", "./icons/apple-touch-icon.png"];
 
 self.addEventListener("install", e => {

@@ -88,6 +88,13 @@ main{padding:0 12px 40px}
 .btn.sm{padding:4px 9px}
 .srow{display:flex;align-items:center;gap:6px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:8px;margin:6px 0}
 .srow .lg{flex:none;font-size:11px;color:var(--mut);border:1px solid var(--line);border-radius:999px;padding:1px 7px}
+.phead{display:flex;align-items:center;gap:8px;margin:18px 0 6px;padding:8px 10px;border-radius:10px;background:var(--acc);color:#fff}
+.phead.min{background:#8a5a2b}
+.phead .pn{font-weight:700;font-size:15px;flex:1;min-width:0}
+.phead .pc{font-size:12px;opacity:.85}
+.phead .pbtns{display:flex;gap:6px}
+.phead .btn{background:rgba(255,255,255,.18);color:#fff;border-color:rgba(255,255,255,.35)}
+.addpart{border:1px solid var(--line);border-radius:10px;padding:10px;margin:8px 0;background:var(--card)}
 .lghead{position:sticky;top:0;background:var(--bg);font-size:12px;font-weight:700;color:var(--acc);text-transform:uppercase;letter-spacing:.04em;padding:10px 2px 4px}
 .lghead span{color:var(--mut);font-weight:400}
 .srow .n{color:var(--mut);width:22px;text-align:right;font-size:13px}
@@ -244,7 +251,7 @@ const NEW_LANG="__new__";
 let overrides={};
 try{overrides=JSON.parse(localStorage.getItem(OV_KEY)||"{}")}catch(e){}
 const saveOv=()=>{try{localStorage.setItem(OV_KEY,JSON.stringify(overrides))}catch(e){};queueState()};
-let userSongs=[], songs=[], state={q:"",lang:"All",mode:"songs",setId:null,picking:false,pickQ:"",pickLang:"all",renaming:false}, curId=null, editing=null;
+let userSongs=[], songs=[], state={q:"",lang:"All",mode:"songs",setId:null,picking:false,pickQ:"",pickLang:"all",pickPart:null,addingPart:false,renaming:false}, curId=null, editing=null;
 const SET_KEY="songbook-setlists-v1";
 let setlists=[]; try{setlists=JSON.parse(localStorage.getItem(SET_KEY)||"[]")}catch(e){}
 const saveSets=()=>{try{localStorage.setItem(SET_KEY,JSON.stringify(setlists))}catch(e){};queueState()};
@@ -473,7 +480,7 @@ function shiftBy(d){tIdx=(tIdx+d+12)%12;renderChordText()}
 function openSong(id){
   const s=songs.find(x=>x.id===id); if(!s)return;
   curId=id;
-  if(playQueue){playIdx=playQueue.indexOf(id);updatePnav()}
+  if(playQueue){playIdx=(playForce!==null?playForce:playQueue.indexOf(id));playForce=null;updatePnav()}
   $("pnav").hidden=!playQueue;
   $("vtitle").textContent=s.title;
   $("vmeta").textContent=[s.key&&("Key "+s.key),s.language].filter(Boolean).join(" · ");
@@ -487,10 +494,11 @@ function updatePnav(){
   $("pcount").textContent=`${playIdx+1} of ${playQueue.length}`;
   $("pprev").disabled=playIdx<=0;$("pnext").disabled=playIdx>=playQueue.length-1;
 }
+let playForce=null;
 function startPlay(queueIds,idx){
-  playQueue=queueIds; openSong(queueIds[idx]);
+  playQueue=queueIds; playForce=idx; openSong(queueIds[idx]);
 }
-function stepPlay(d){const n=playIdx+d; if(playQueue&&n>=0&&n<playQueue.length)openSong(playQueue[n])}
+function stepPlay(d){const n=playIdx+d; if(playQueue&&n>=0&&n<playQueue.length){playForce=n;openSong(playQueue[n])}}
 
 /* ---------- add / edit form ---------- */
 function fillLangSelect(selected){
@@ -627,40 +635,73 @@ function pickListHtml(ids){
     return g.length?`<div class="lghead">${esc(l)} <span>${g.length}</span></div>`+g.map(row).join(""):"";
   }).join("");
 }
+/* ---------- setlist sections: Morning / Evening service and their ministration songs ---------- */
+function partsOf(set){
+  if(!Array.isArray(set.parts)||!set.parts.length){
+    set.parts=[{id:"p"+Date.now().toString(36),name:"Songs",kind:"songs",songIds:Array.isArray(set.songIds)?[...set.songIds]:[]}];
+  }
+  return set.parts;
+}
+const partIds=p=>existingIds(p.songIds||[]);
+const allSetIds=set=>partsOf(set).flatMap(partIds);
+function syncLegacy(set){set.songIds=[...new Set(allSetIds(set))]}
+function partLayout(set,part,ids){
+  return part.kind==="ministration"?{groups:[{lang:null,idxs:ids.map((_,i)=>i)}]}:setLayout(set,ids);
+}
+function partPlay(set,part){const ids=partIds(part);return partLayout(set,part,ids).groups.flatMap(g=>g.idxs.map(i=>ids[i]))}
+function fullQueue(set){return partsOf(set).flatMap(p=>partPlay(set,p))}
+const PRESETS=[["Morning Service","songs"],["Morning Ministration","ministration"],["Evening Service","songs"],["Evening Ministration","ministration"]];
+function addPart(set,name,kind){
+  partsOf(set);
+  // a brand-new empty default section is replaced instead of left behind
+  if(set.parts.length===1&&set.parts[0].name==="Songs"&&!set.parts[0].songIds.length)set.parts=[];
+  if(set.parts.some(p=>p.name.toLowerCase()===name.toLowerCase()))return false;
+  set.parts.push({id:"p"+Date.now().toString(36)+Math.random().toString(36).slice(2,5),name,kind,songIds:[]});
+  return true;
+}
 function renderSetsRaw(){
   const box=$("sets");
   const set=curSet();
   if(!set){
-    state.setId=null;state.picking=false;state.renaming=false;
+    state.setId=null;state.picking=false;state.renaming=false;state.addingPart=false;
     box.innerHTML=`<div class="newset"><input id="newName" placeholder="New setlist, e.g. Sunday service"><button class="btn pri" id="newBtn">Create</button></div>`+
       (setlists.length
-        ? setlists.map(s=>`<button class="row" data-set="${esc(s.id)}"><span class="t">${esc(s.name)}</span><span class="m"><span>${existingIds(s.songIds).length} songs${langSummary(existingIds(s.songIds))?" · "+esc(langSummary(existingIds(s.songIds))):""}</span></span></button>`).join("")
+        ? setlists.map(s=>{const ids=allSetIds(s),ls=langSummary(ids);return `<button class="row" data-set="${esc(s.id)}"><span class="t">${esc(s.name)}</span><span class="m"><span>${ids.length} songs${ls?" · "+esc(ls):""}</span></span></button>`}).join("")
         : `<div class="empty">No setlists yet. Create one above, then add songs to it.</div>`);
     return;
   }
-  const ids=existingIds(set.songIds);
-  set.songIds=ids;
+  const parts=partsOf(set);syncLegacy(set);
+  const all=allSetIds(set);
   let h=`<div class="dhead"><button class="btn" id="setBack">&larr; All setlists</button><button class="btn" id="setRename">Rename</button><button class="btn del" id="setDel">Delete</button></div>
   ${state.renaming?`<div class="newset"><input id="renameInput" value="${esc(set.name)}" maxlength="80" autocomplete="off"><button class="btn pri" id="renameSave">Save</button><button class="btn" id="renameCancel">Cancel</button></div>`:`<h2 class="sname">${esc(set.name)}</h2>`}
-  ${ids.length?`<div class="hint" style="margin:2px 0 6px">${esc(langSummary(ids))}</div>`:""}
-  <div class="setbtns"><button class="btn pri" id="setPlay" ${ids.length?"":"disabled"}>&#9654; Play setlist</button><button class="btn" id="setAdd">${state.picking?"Done adding":"+ Add songs"}</button><button class="btn" id="setShare" ${ids.length?"":"disabled"}>Share</button><button class="btn ${setGrouped(set)?"pri":""}" id="setGroup">${setGrouped(set)?"Grouped by language":"Group by language"}</button></div>`;
-  if(!ids.length&&!state.picking) h+=`<div class="empty">No songs yet. Tap "+ Add songs".</div>`;
-  {
-    const view=setLayout(set,ids);let n=0;
+  ${all.length?`<div class="hint" style="margin:2px 0 6px">${esc(langSummary(all))}</div>`:""}
+  <div class="setbtns"><button class="btn pri" id="setPlay" ${all.length?"":"disabled"}>&#9654; Play setlist</button><button class="btn" id="setShare" ${all.length?"":"disabled"}>Share</button><button class="btn ${setGrouped(set)?"pri":""}" id="setGroup">${setGrouped(set)?"Grouped by language":"Group by language"}</button><button class="btn" id="partNew">${state.addingPart?"Close":"+ Add section"}</button></div>`;
+  if(state.addingPart){
+    h+=`<div class="addpart"><div class="hint" style="margin:0 0 6px">Add a section to this setlist:</div><div class="chips">`+
+      PRESETS.map(([n,k])=>`<button type="button" class="chip" data-preset="${esc(n)}" data-kind="${k}">${esc(n)}</button>`).join("")+
+      `<button type="button" class="chip" data-preset="ALL">Morning + Evening (all 4)</button></div>
+      <div class="newset" style="margin-top:8px"><input id="partName" placeholder="Or a custom name" maxlength="60" autocomplete="off"><button class="btn" id="partCustomSongs">Songs</button><button class="btn" id="partCustomMin">Ministration</button></div></div>`;
+  }
+  parts.forEach(part=>{
+    const ids=partIds(part),min=part.kind==="ministration";
+    const picking=state.picking&&state.pickPart===part.id;
+    h+=`<div class="phead ${min?"min":""}"><span class="pn">${esc(part.name)}</span><span class="pc">${min?"ministration · ":""}${ids.length}</span><span class="pbtns"><button class="btn sm" data-ppl="${esc(part.id)}" ${ids.length?"":"disabled"} title="Play this section">&#9654;</button><button class="btn sm" data-padd="${esc(part.id)}">${picking?"Done":"+ Add songs"}</button><button class="btn sm del" data-pdel="${esc(part.id)}" title="Remove section">&times;</button></span></div>`;
+    if(!ids.length&&!picking)h+=`<div class="empty" style="padding:8px 0">No songs yet.</div>`;
+    const view=partLayout(set,part,ids);let n=0;
     view.groups.forEach(g=>{
       if(g.lang)h+=`<div class="lghead">[ ${esc(g.lang)} ] <span>${g.idxs.length}</span></div>`;
       g.idxs.forEach((i,pos)=>{
         const sg=songs.find(x=>x.id===ids[i]);n++;
-        h+=`<div class="srow"><span class="n">${n}</span><button class="stitle" data-open="${i}">${esc(sg.title)}</button>${g.lang?"":`<span class="lg">${esc(sg.language||"")}</span>`}<button class="btn sm" data-up="${i}" ${pos===0?"disabled":""}>&uarr;</button><button class="btn sm" data-down="${i}" ${pos===g.idxs.length-1?"disabled":""}>&darr;</button><button class="btn sm del" data-rm="${i}">&times;</button></div>`;
+        h+=`<div class="srow"><span class="n">${n}</span><button class="stitle" data-open="${i}" data-pp="${esc(part.id)}">${esc(sg.title)}</button>${g.lang?"":`<span class="lg">${esc(sg.language||"")}</span>`}<button class="btn sm" data-up="${i}" data-pp="${esc(part.id)}" ${pos===0?"disabled":""}>&uarr;</button><button class="btn sm" data-down="${i}" data-pp="${esc(part.id)}" ${pos===g.idxs.length-1?"disabled":""}>&darr;</button><button class="btn sm del" data-rm="${i}" data-pp="${esc(part.id)}">&times;</button></div>`;
       });
     });
-  }
-  if(state.picking){
-    h+=`<div class="hint" style="margin:10px 0 4px">Search, then tick songs to add them to this setlist:</div>
-    <input id="pickQ" type="search" placeholder="Search title, key or language" autocomplete="off" value="${esc(state.pickQ||"")}" style="width:100%;margin:4px 0 6px;padding:10px 12px;font:inherit;border:1px solid var(--line);border-radius:10px;background:var(--card);color:inherit">
-    <div class="chips" id="pickLangs" style="margin:4px 0 6px">${pickChipsHtml()}</div>
-    <div id="pickList">${pickListHtml(ids)}</div>`;
-  }
+    if(picking){
+      h+=`<div class="hint" style="margin:10px 0 4px">Adding to <b>${esc(part.name)}</b>. Search, then tick songs:</div>
+      <input id="pickQ" type="search" placeholder="Search title, key or language" autocomplete="off" value="${esc(state.pickQ||"")}" style="width:100%;margin:4px 0 6px;padding:10px 12px;font:inherit;border:1px solid var(--line);border-radius:10px;background:var(--card);color:inherit">
+      <div class="chips" id="pickLangs" style="margin:4px 0 6px">${pickChipsHtml()}</div>
+      <div id="pickList">${pickListHtml(ids)}</div>`;
+    }
+  });
   box.innerHTML=h;
 }
 function saveRename(){
@@ -674,7 +715,11 @@ $("sets").addEventListener("keydown",e=>{
   if(e.key==="Enter"){e.preventDefault();saveRename()}
   else if(e.key==="Escape"){state.renaming=false;renderSets()}
 });
-function setSongs(fn){const set=curSet();if(!set)return;set.songIds=fn(existingIds(set.songIds));saveSets();renderSets()}
+function curPart(set,id){return partsOf(set).find(p=>p.id===id)}
+function setPartSongs(partId,fn){
+  const set=curSet();if(!set)return;const part=curPart(set,partId);if(!part)return;
+  part.songIds=fn(partIds(part));syncLegacy(set);saveSets();renderSets();
+}
 $("modes").addEventListener("click",e=>{const b=e.target.closest("button");if(b)setMode(b.dataset.m)});
 $("sets").addEventListener("click",e=>{
   const t=e.target.closest("button"); if(!t)return;
@@ -682,10 +727,11 @@ $("sets").addEventListener("click",e=>{
   if(t.id==="newBtn"){
     const n=$("newName").value.trim(); if(!n)return;
     const s={id:"s"+Date.now(),name:n,songIds:[]};
-    setlists.push(s);saveSets();state.setId=s.id;renderSets();return;
+    partsOf(s);setlists.push(s);saveSets();state.setId=s.id;renderSets();return;
   }
-  if(t.dataset.set){state.setId=t.dataset.set;state.picking=false;renderSets();return}
+  if(t.dataset.set){state.setId=t.dataset.set;state.picking=false;state.addingPart=false;renderSets();return}
   if(!set)return;
+  if(t.dataset.pl!==undefined)return;                         // language chips are handled below
   if(t.id==="setBack"){state.setId=null;state.renaming=false;renderSets();return}
   if(t.id==="setRename"){state.renaming=true;renderSets();const i=$("renameInput");if(i){i.focus();i.select()}return}
   if(t.id==="renameCancel"){state.renaming=false;renderSets();return}
@@ -698,38 +744,68 @@ $("sets").addEventListener("click",e=>{
   }
   if(t.id==="setShare"){shareSet();return}
   if(t.id==="setGroup"){set.group=!setGrouped(set);saveSets();renderSets();return}
-  if(t.id==="setPlay"){const q=playOrder(set,existingIds(set.songIds));if(q.length)startPlay(q,0);return}
-  if(t.id==="setAdd"){state.picking=!state.picking;state.pickQ="";state.pickLang="all";renderSets();return}
+  if(t.id==="setPlay"){const q=fullQueue(set);if(q.length)startPlay(q,0);return}
+  if(t.id==="partNew"){state.addingPart=!state.addingPart;renderSets();return}
+  if(t.dataset.preset!==undefined){
+    if(t.dataset.preset==="ALL")PRESETS.forEach(([n,k])=>addPart(set,n,k));
+    else if(!addPart(set,t.dataset.preset,t.dataset.kind))msg("That section already exists.");
+    state.addingPart=false;saveSets();renderSets();return;
+  }
+  if(t.id==="partCustomSongs"||t.id==="partCustomMin"){
+    const n=($("partName").value||"").trim();if(!n){msg("Please type a section name.");return}
+    if(!addPart(set,n,t.id==="partCustomMin"?"ministration":"songs"))msg("That section already exists.");
+    state.addingPart=false;saveSets();renderSets();return;
+  }
+  if(t.dataset.padd!==undefined){
+    const id=t.dataset.padd;
+    if(state.picking&&state.pickPart===id)state.picking=false;else{state.picking=true;state.pickPart=id}
+    state.pickQ="";state.pickLang="all";renderSets();return;
+  }
+  if(t.dataset.pdel!==undefined){
+    const part=curPart(set,t.dataset.pdel);if(!part)return;
+    if(confirm(`Remove the section "${part.name}"? The songs themselves are kept.`)){
+      set.parts=set.parts.filter(p=>p.id!==part.id);if(state.pickPart===part.id)state.picking=false;
+      syncLegacy(set);saveSets();renderSets();
+    }
+    return;
+  }
+  if(t.dataset.ppl!==undefined){const part=curPart(set,t.dataset.ppl);const q=part?partPlay(set,part):[];if(q.length)startPlay(q,0);return}
+  const part=t.dataset.pp?curPart(set,t.dataset.pp):null;
+  if(!part)return;
   if(t.dataset.open!==undefined){
-    const ids=existingIds(set.songIds),q=playOrder(set,ids);
-    startPlay(q,Math.max(0,q.indexOf(ids[Number(t.dataset.open)])));return}
+    const ids=partIds(part),pq=partPlay(set,part),raw=Number(t.dataset.open);
+    let off=0;for(const p of partsOf(set)){if(p.id===part.id)break;off+=partPlay(set,p).length}
+    // position of this exact song inside its section's play order
+    const lay=partLayout(set,part,ids).groups.flatMap(g=>g.idxs);
+    startPlay(fullQueue(set),off+Math.max(0,lay.indexOf(raw)));return;
+  }
   if(t.dataset.up!==undefined||t.dataset.down!==undefined){
     const up=t.dataset.up!==undefined,i=Number(up?t.dataset.up:t.dataset.down);
-    setSongs(ids=>{
-      const g=setLayout(set,ids).groups.find(x=>x.idxs.includes(i)),pos=g.idxs.indexOf(i),j=g.idxs[pos+(up?-1:1)];
+    setPartSongs(part.id,ids=>{
+      const g=partLayout(set,part,ids).groups.find(x=>x.idxs.includes(i)),pos=g.idxs.indexOf(i),j=g.idxs[pos+(up?-1:1)];
       if(j===undefined)return ids;
       [ids[i],ids[j]]=[ids[j],ids[i]];return ids;
     });return;
   }
-  if(t.dataset.rm!==undefined){const i=Number(t.dataset.rm);setSongs(ids=>ids.filter((_,k)=>k!==i));return}
+  if(t.dataset.rm!==undefined){const i=Number(t.dataset.rm);setPartSongs(part.id,ids=>ids.filter((_,k)=>k!==i));return}
 });
 $("sets").addEventListener("click",e=>{
   const b=e.target.closest("[data-pl]");if(!b)return;
   state.pickLang=b.dataset.pl;
-  const set=curSet();if(!set)return;
+  const set=curSet();if(!set)return;const part=curPart(set,state.pickPart);if(!part)return;
   $("pickLangs").innerHTML=pickChipsHtml();
-  $("pickList").innerHTML=pickListHtml(existingIds(set.songIds));
+  $("pickList").innerHTML=pickListHtml(partIds(part));
 });
 $("sets").addEventListener("input",e=>{
   if(e.target.id!=="pickQ")return;
   state.pickQ=e.target.value;
-  const set=curSet();if(!set)return;
-  $("pickList").innerHTML=pickListHtml(existingIds(set.songIds));
+  const set=curSet();if(!set)return;const part=curPart(set,state.pickPart);if(!part)return;
+  $("pickList").innerHTML=pickListHtml(partIds(part));
 });
 $("sets").addEventListener("change",e=>{
   const c=e.target; if(!c.dataset.pick)return;
   const id=c.dataset.pick;
-  setSongs(ids=>c.checked?(ids.includes(id)?ids:[...ids,id]):ids.filter(x=>x!==id));
+  setPartSongs(state.pickPart,ids=>c.checked?(ids.includes(id)?ids:[...ids,id]):ids.filter(x=>x!==id));
 });
 $("pprev").addEventListener("click",()=>stepPlay(-1));
 $("pnext").addEventListener("click",()=>stepPlay(1));
@@ -933,9 +1009,13 @@ async function shareSong(){
 }
 async function shareSet(){
   const set=curSet(); if(!set)return;
-  const ids=existingIds(set.songIds),view=setLayout(set,ids);let n=0;
-  const line=id=>{const s=songs.find(x=>x.id===id);n++;return `${n}. ${s.title}${s.key?" (Key "+s.key+")":""}`};
-  const text=set.name+"\n\n"+view.groups.map(g=>(g.lang?`[ ${g.lang} ]\n`:"")+g.idxs.map(i=>line(ids[i])).join("\n")).join("\n\n");
+  const blocks=partsOf(set).filter(p=>partIds(p).length).map(part=>{
+    const ids=partIds(part),view=partLayout(set,part,ids);let n=0;
+    const line=id=>{const sg=songs.find(x=>x.id===id);n++;return `${n}. ${sg.title}${sg.key?" (Key "+sg.key+")":""}`};
+    const body=view.groups.map(g=>(g.lang?`[ ${g.lang} ]\n`:"")+g.idxs.map(i=>line(ids[i])).join("\n")).join("\n\n");
+    return (partsOf(set).length>1||part.name!=="Songs"?part.name.toUpperCase()+"\n":"")+body;
+  });
+  const text=set.name+"\n\n"+blocks.join("\n\n");
   const r=await deliver(set.name,text,null); if(r)msg(r);
 }
 $("share").addEventListener("click",shareSong);
