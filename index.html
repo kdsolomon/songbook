@@ -94,6 +94,7 @@ main{padding:0 12px 40px}
 .phead .pc{font-size:12px;opacity:.85}
 .phead .pbtns{display:flex;gap:6px}
 .phead .btn{background:rgba(255,255,255,.18);color:#fff;border-color:rgba(255,255,255,.35)}
+.movebar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:6px 8px;margin:-2px 0 6px;border-left:3px solid var(--acc);font-size:13px;color:var(--mut)}
 .addpart{border:1px solid var(--line);border-radius:10px;padding:10px;margin:8px 0;background:var(--card)}
 .lghead{position:sticky;top:0;background:var(--bg);font-size:12px;font-weight:700;color:var(--acc);text-transform:uppercase;letter-spacing:.04em;padding:10px 2px 4px}
 .lghead span{color:var(--mut);font-weight:400}
@@ -251,7 +252,7 @@ const NEW_LANG="__new__";
 let overrides={};
 try{overrides=JSON.parse(localStorage.getItem(OV_KEY)||"{}")}catch(e){}
 const saveOv=()=>{try{localStorage.setItem(OV_KEY,JSON.stringify(overrides))}catch(e){};queueState()};
-let userSongs=[], songs=[], state={q:"",lang:"All",mode:"songs",setId:null,picking:false,pickQ:"",pickLang:"all",pickPart:null,pickScope:"all",pickPool:[],addingPart:false,renaming:false}, curId=null, editing=null;
+let userSongs=[], songs=[], state={q:"",lang:"All",mode:"songs",setId:null,picking:false,pickQ:"",pickLang:"all",pickPart:null,pickScope:"all",pickPool:[],moveKey:null,addingPart:false,renaming:false}, curId=null, editing=null;
 const SET_KEY="songbook-setlists-v1";
 let setlists=[]; try{setlists=JSON.parse(localStorage.getItem(SET_KEY)||"[]")}catch(e){}
 const saveSets=()=>{try{localStorage.setItem(SET_KEY,JSON.stringify(setlists))}catch(e){};queueState()};
@@ -429,17 +430,20 @@ function xposeText(text,off,flats){
   }).join("\n");
 }
 let originIdx=0, tIdx=0, viewMode="photo", minorKey=false;
-const kl=i=>LABELS[i]+(minorKey?"m":"");
+const MINOR_LABELS=["C","C#","D","Eb","E","F","F#","G","G#","A","Bb","B"];
+const MINOR_FLAT_IDX=new Set([0,2,3,5,7,10]);               // Cm Dm Ebm Fm Gm Bbm use flats, the others sharps
+const kl=i=>(minorKey?MINOR_LABELS:LABELS)[i]+(minorKey?"m":"");
+const useFlats=i=>minorKey?MINOR_FLAT_IDX.has(i):FLAT_LABELS.has(LABELS[i]);
 function setTransposeFor(s){
   const m=(s.key||"").match(/^([A-G](?:#|b)?)/);
   originIdx=m&&IDX[m[1]]!==undefined?IDX[m[1]]:0;
   minorKey=/^[A-G](?:#|b)?m(?!aj)/.test(s.key||"");
   tIdx=originIdx;
-  $("tkey").innerHTML=LABELS.map((l,i)=>`<option value="${i}">${l}${minorKey?"m":""}</option>`).join("");
+  $("tkey").innerHTML=(minorKey?MINOR_LABELS:LABELS).map((l,i)=>`<option value="${i}">${l}${minorKey?"m":""}</option>`).join("");
   $("tkey").value=String(tIdx);
   renderChordText();
 }
-const isCountLine=l=>{const x=l.trim();return x.length>0&&/^((\d+|-|stop)\s*)+$/i.test(x)};
+const isCountLine=l=>{const x=l.trim();return x.length>0&&/^((?:\d+(?:[½¼¾]|\.\d+|\/\d+)?|[½¼¾]|-|stop)\s*)+$/i.test(x)};
 const isChordLine=l=>{const toks=l.trim().split(/\s+/).filter(Boolean);if(!toks.length)return false;const n=toks.filter(t=>CHORD_RE.test(stripWrap(t))).length;return n/toks.length>=0.6};
 function renderChords(text){
   const lines=String(text||"").split("\n");let html="";
@@ -464,7 +468,7 @@ function renderChordText(){
   const s=songs.find(x=>x.id===curId); if(!s)return;
   const off=(tIdx-originIdx+12)%12;
   $("tkey").value=String(tIdx);
-  $("chords").innerHTML=s.chords?renderChords(xposeText(s.chords,off,FLAT_LABELS.has(LABELS[tIdx]))):'<div class="lyr">No chords added yet. Tap Edit, then paste or type the chords.</div>';
+  $("chords").innerHTML=s.chords?renderChords(xposeText(s.chords,off,useFlats(tIdx))):'<div class="lyr">No chords added yet. Tap Edit, then paste or type the chords.</div>';
   $("tinfo").textContent=`Original key: ${s.key||"not set"} · Showing in ${kl(tIdx)}`;
 }
 function setView(mode){
@@ -701,7 +705,11 @@ function renderSetsRaw(){
       if(g.lang)h+=`<div class="lghead">[ ${esc(g.lang)} ] <span>${g.idxs.length}</span></div>`;
       g.idxs.forEach((i,pos)=>{
         const sg=songs.find(x=>x.id===ids[i]);n++;
-        h+=`<div class="srow"><span class="n">${n}</span><button class="stitle" data-open="${i}" data-pp="${esc(part.id)}">${esc(sg.title)}</button>${g.lang?"":`<span class="lg">${esc(sg.language||"")}</span>`}<button class="btn sm" data-up="${i}" data-pp="${esc(part.id)}" ${pos===0?"disabled":""}>&uarr;</button><button class="btn sm" data-down="${i}" data-pp="${esc(part.id)}" ${pos===g.idxs.length-1?"disabled":""}>&darr;</button><button class="btn sm del" data-rm="${i}" data-pp="${esc(part.id)}">&times;</button></div>`;
+        h+=`<div class="srow"><span class="n">${n}</span><button class="stitle" data-open="${i}" data-pp="${esc(part.id)}">${esc(sg.title)}</button>${g.lang?"":`<span class="lg">${esc(sg.language||"")}</span>`}<button class="btn sm" data-up="${i}" data-pp="${esc(part.id)}" ${pos===0?"disabled":""}>&uarr;</button><button class="btn sm" data-down="${i}" data-pp="${esc(part.id)}" ${pos===g.idxs.length-1?"disabled":""}>&darr;</button><button class="btn sm" data-mv="${i}" data-pp="${esc(part.id)}" title="Move to another section">&#8644;</button><button class="btn sm del" data-rm="${i}" data-pp="${esc(part.id)}">&times;</button></div>`;
+        if(state.moveKey===part.id+":"+i){
+          const others=parts.filter(q=>q.id!==part.id);
+          h+=`<div class="movebar">${others.length?"Move to: "+others.map(q=>`<button type="button" class="chip" data-moveto="${esc(q.id)}">${esc(q.name)}</button>`).join(""):"Add another section first."}</div>`;
+        }
       });
     });
     if(picking){
@@ -783,6 +791,19 @@ $("sets").addEventListener("click",e=>{
     }
     return;
   }
+  if(t.dataset.moveto!==undefined){
+    const [fromId,idx]=String(state.moveKey||"").split(":"),from=curPart(set,fromId),to=curPart(set,t.dataset.moveto);
+    state.moveKey=null;
+    if(from&&to){
+      const ids=partIds(from),id=ids[Number(idx)];
+      if(id!==undefined){
+        from.songIds=ids.filter((_,k)=>k!==Number(idx));
+        if(!partIds(to).includes(id))to.songIds=[...partIds(to),id];
+        syncLegacy(set);saveSets();msg("Moved to "+to.name+".");
+      }
+    }
+    renderSets();return;
+  }
   if(t.dataset.ppl!==undefined){const part=curPart(set,t.dataset.ppl);const q=part?partPlay(set,part):[];if(q.length)startPlay(q,0);return}
   const part=t.dataset.pp?curPart(set,t.dataset.pp):null;
   if(!part)return;
@@ -801,7 +822,8 @@ $("sets").addEventListener("click",e=>{
       [ids[i],ids[j]]=[ids[j],ids[i]];return ids;
     });return;
   }
-  if(t.dataset.rm!==undefined){const i=Number(t.dataset.rm);setPartSongs(part.id,ids=>ids.filter((_,k)=>k!==i));return}
+  if(t.dataset.mv!==undefined){const k=part.id+":"+t.dataset.mv;state.moveKey=state.moveKey===k?null:k;renderSets();return}
+  if(t.dataset.rm!==undefined){const i=Number(t.dataset.rm);state.moveKey=null;setPartSongs(part.id,ids=>ids.filter((_,k)=>k!==i));return}
 });
 $("sets").addEventListener("click",e=>{
   const sc=e.target.closest("[data-scope]");
@@ -1013,7 +1035,7 @@ async function shareImage(title,blob,text){
 }
 async function shareSong(){
   const s=songs.find(x=>x.id===curId); if(!s)return;
-  const off=(tIdx-originIdx+12)%12, flats=FLAT_LABELS.has(LABELS[tIdx]);
+  const off=(tIdx-originIdx+12)%12, flats=useFlats(tIdx);
   const text=songShareText(s,off,flats);
   msg("Preparing image…");
   try{
@@ -1146,7 +1168,7 @@ function cbKeyChips(){
 function cbReset(){CB.root=null;CB.type="";CB.bass=null;CB.row=[];CB.end="";cbKeyChips();cbRender()}
 (function cbInit(){
   cbBtns("cbSec",["Intro","Verse","Pre-Chorus","Chorus","Bridge","Interlude","Outro"].map(x=>[x,x]));
-  cbBtns("cbCnt",[["none",""],...["1","2","3","4","6","8","-"].map(x=>[x,x])]);
+  cbBtns("cbCnt",[["none",""],...["½","1","1½","2","2½","3","3½","4","6","8","-"].map(x=>[x,x])]);
   cbBtns("cbRoot",CB_ROOTS.map(x=>[x,x]));
   cbBtns("cbType",CB_TYPES.map(([l,v])=>[l,v]));
   cbBtns("cbBass",[["none","none"],...CB_ROOTS.map(x=>[x,x])]);
