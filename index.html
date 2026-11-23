@@ -602,6 +602,19 @@ function langSummary(ids){
   const c={};ids.forEach(id=>{const s=songs.find(x=>x.id===id);if(s){const l=s.language||"Other";c[l]=(c[l]||0)+1}});
   return Object.entries(c).sort((a,b)=>b[1]-a[1]).map(([l,n])=>`${n} ${l}`).join(" · ");
 }
+/* songs of a setlist, grouped by language (default) or in the saved order */
+function setGrouped(set){return set.group!==false}
+function setLayout(set,ids){
+  if(!setGrouped(set))return {groups:[{lang:null,idxs:ids.map((_,i)=>i)}]};
+  const order=[],map={};
+  ids.forEach((id,i)=>{
+    const s=songs.find(x=>x.id===id),l=(s&&s.language)||"Other";
+    if(!map[l]){map[l]=[];order.push(l)}
+    map[l].push(i);
+  });
+  return {groups:order.map(l=>({lang:l,idxs:map[l]}))};
+}
+function playOrder(set,ids){return setLayout(set,ids).groups.flatMap(g=>g.idxs.map(i=>ids[i]))}
 function pickListHtml(ids){
   const q=(state.pickQ||"").trim().toLowerCase();
   const list=[...songs].filter(s=>(state.pickLang==="all"||(s.language||"Other")===state.pickLang)&&(!q||[s.title,s.key,s.language].some(v=>String(v||"").toLowerCase().includes(q))))
@@ -630,9 +643,18 @@ function renderSetsRaw(){
   let h=`<div class="dhead"><button class="btn" id="setBack">&larr; All setlists</button><button class="btn" id="setRename">Rename</button><button class="btn del" id="setDel">Delete</button></div>
   ${state.renaming?`<div class="newset"><input id="renameInput" value="${esc(set.name)}" maxlength="80" autocomplete="off"><button class="btn pri" id="renameSave">Save</button><button class="btn" id="renameCancel">Cancel</button></div>`:`<h2 class="sname">${esc(set.name)}</h2>`}
   ${ids.length?`<div class="hint" style="margin:2px 0 6px">${esc(langSummary(ids))}</div>`:""}
-  <div class="setbtns"><button class="btn pri" id="setPlay" ${ids.length?"":"disabled"}>&#9654; Play setlist</button><button class="btn" id="setAdd">${state.picking?"Done adding":"+ Add songs"}</button><button class="btn" id="setShare" ${ids.length?"":"disabled"}>Share</button></div>`;
+  <div class="setbtns"><button class="btn pri" id="setPlay" ${ids.length?"":"disabled"}>&#9654; Play setlist</button><button class="btn" id="setAdd">${state.picking?"Done adding":"+ Add songs"}</button><button class="btn" id="setShare" ${ids.length?"":"disabled"}>Share</button><button class="btn ${setGrouped(set)?"pri":""}" id="setGroup">${setGrouped(set)?"Grouped by language":"Group by language"}</button></div>`;
   if(!ids.length&&!state.picking) h+=`<div class="empty">No songs yet. Tap "+ Add songs".</div>`;
-  h+=ids.map((id,i)=>{const s=songs.find(x=>x.id===id);return `<div class="srow"><span class="n">${i+1}</span><button class="stitle" data-open="${i}">${esc(s.title)}</button><span class="lg">${esc(s.language||"")}</span><button class="btn sm" data-up="${i}" ${i===0?"disabled":""}>&uarr;</button><button class="btn sm" data-down="${i}" ${i===ids.length-1?"disabled":""}>&darr;</button><button class="btn sm del" data-rm="${i}">&times;</button></div>`}).join("");
+  {
+    const view=setLayout(set,ids);let n=0;
+    view.groups.forEach(g=>{
+      if(g.lang)h+=`<div class="lghead">[ ${esc(g.lang)} ] <span>${g.idxs.length}</span></div>`;
+      g.idxs.forEach((i,pos)=>{
+        const sg=songs.find(x=>x.id===ids[i]);n++;
+        h+=`<div class="srow"><span class="n">${n}</span><button class="stitle" data-open="${i}">${esc(sg.title)}</button>${g.lang?"":`<span class="lg">${esc(sg.language||"")}</span>`}<button class="btn sm" data-up="${i}" ${pos===0?"disabled":""}>&uarr;</button><button class="btn sm" data-down="${i}" ${pos===g.idxs.length-1?"disabled":""}>&darr;</button><button class="btn sm del" data-rm="${i}">&times;</button></div>`;
+      });
+    });
+  }
   if(state.picking){
     h+=`<div class="hint" style="margin:10px 0 4px">Search, then tick songs to add them to this setlist:</div>
     <input id="pickQ" type="search" placeholder="Search title, key or language" autocomplete="off" value="${esc(state.pickQ||"")}" style="width:100%;margin:4px 0 6px;padding:10px 12px;font:inherit;border:1px solid var(--line);border-radius:10px;background:var(--card);color:inherit">
@@ -675,11 +697,20 @@ $("sets").addEventListener("click",e=>{
     return;
   }
   if(t.id==="setShare"){shareSet();return}
-  if(t.id==="setPlay"){if(set.songIds.length)startPlay([...set.songIds],0);return}
+  if(t.id==="setGroup"){set.group=!setGrouped(set);saveSets();renderSets();return}
+  if(t.id==="setPlay"){const q=playOrder(set,existingIds(set.songIds));if(q.length)startPlay(q,0);return}
   if(t.id==="setAdd"){state.picking=!state.picking;state.pickQ="";state.pickLang="all";renderSets();return}
-  if(t.dataset.open!==undefined){startPlay([...set.songIds],Number(t.dataset.open));return}
-  if(t.dataset.up!==undefined){const i=Number(t.dataset.up);setSongs(ids=>{[ids[i-1],ids[i]]=[ids[i],ids[i-1]];return ids});return}
-  if(t.dataset.down!==undefined){const i=Number(t.dataset.down);setSongs(ids=>{[ids[i+1],ids[i]]=[ids[i],ids[i+1]];return ids});return}
+  if(t.dataset.open!==undefined){
+    const ids=existingIds(set.songIds),q=playOrder(set,ids);
+    startPlay(q,Math.max(0,q.indexOf(ids[Number(t.dataset.open)])));return}
+  if(t.dataset.up!==undefined||t.dataset.down!==undefined){
+    const up=t.dataset.up!==undefined,i=Number(up?t.dataset.up:t.dataset.down);
+    setSongs(ids=>{
+      const g=setLayout(set,ids).groups.find(x=>x.idxs.includes(i)),pos=g.idxs.indexOf(i),j=g.idxs[pos+(up?-1:1)];
+      if(j===undefined)return ids;
+      [ids[i],ids[j]]=[ids[j],ids[i]];return ids;
+    });return;
+  }
   if(t.dataset.rm!==undefined){const i=Number(t.dataset.rm);setSongs(ids=>ids.filter((_,k)=>k!==i));return}
 });
 $("sets").addEventListener("click",e=>{
@@ -902,7 +933,9 @@ async function shareSong(){
 }
 async function shareSet(){
   const set=curSet(); if(!set)return;
-  const text=set.name+"\n\n"+existingIds(set.songIds).map((id,i)=>{const s=songs.find(x=>x.id===id);return `${i+1}. ${s.title}${s.key?" (Key "+s.key+")":""}`}).join("\n");
+  const ids=existingIds(set.songIds),view=setLayout(set,ids);let n=0;
+  const line=id=>{const s=songs.find(x=>x.id===id);n++;return `${n}. ${s.title}${s.key?" (Key "+s.key+")":""}`};
+  const text=set.name+"\n\n"+view.groups.map(g=>(g.lang?`[ ${g.lang} ]\n`:"")+g.idxs.map(i=>line(ids[i])).join("\n")).join("\n\n");
   const r=await deliver(set.name,text,null); if(r)msg(r);
 }
 $("share").addEventListener("click",shareSong);
