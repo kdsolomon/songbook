@@ -539,6 +539,19 @@ function resizeImage(file,max=1000){
     img.src=url;
   });
 }
+const normTitle=t=>String(t||"").toLowerCase().replace(/[^a-z0-9\u0080-\uffff]+/g," ").trim();
+function findDuplicate(title,ignoreId){
+  const n=normTitle(title);if(!n)return null;
+  return songs.find(x=>x.id!==ignoreId&&normTitle(x.title)===n)||null;
+}
+const dupMsg=d=>`"${d.title}" is already in your songs (${d.language||"no language"}${d.key?", key "+d.key:""}).`;
+$("ft").addEventListener("input",()=>{
+  const t=$("ft").value.trim(),err=$("ferr");
+  const changed=!editing||normTitle(editing.title)!==normTitle(t);
+  const dup=t&&changed?findDuplicate(t,editing&&editing.id):null;
+  if(dup)err.textContent=dupMsg(dup);
+  else if(err.textContent.endsWith("in your songs.)")||/is already in your songs/.test(err.textContent))err.textContent="";
+});
 async function saveForm(e){
   e.preventDefault();
   const title=$("ft").value.trim();
@@ -549,6 +562,11 @@ async function saveForm(e){
     language=n;
   }
   if(!title){$("ferr").textContent="Please enter a title.";return}
+  {
+    const changed=!editing||normTitle(editing.title)!==normTitle(title);   // editing a song's chords never trips over an older copy
+    const dup=changed?findDuplicate(title,editing&&editing.id):null;
+    if(dup){$("ferr").textContent=dupMsg(dup);return}
+  }
   try{
     if(editing&&editing.builtin){
       overrides[editing.id]={...(overrides[editing.id]||{}),title,language,key,chords};
@@ -891,9 +909,15 @@ async function restore(file){
   try{data=JSON.parse(await file.text())}catch(e){alert("That file is not a valid backup.");return}
   if(!data||data.app!=="songbook"||!Array.isArray(data.songs)){alert("That file is not a songbook backup.");return}
   const bIds=new Set(BUILTIN.map(x=>x.id));
-  const fresh=data.songs.filter(x=>!bIds.has(x.id));          // songs already inside the app are not copied again
+  const seen=new Set(songs.map(x=>normTitle(x.title)));
+  const fresh=data.songs.filter(x=>{
+    if(bIds.has(x.id))return false;                             // already inside the app
+    const n=normTitle(x.title);if(seen.has(n))return false;     // same title already present
+    seen.add(n);return true;
+  });
+  const skipped=data.songs.length-fresh.length;
   const sets=Array.isArray(data.setlists)?data.setlists:[];
-  if(!confirm(`Import ${fresh.length} new song(s) and ${sets.length} setlist(s) from this backup?\n\nYour current songs and setlists are kept. Items with the same ID are updated.`))return;
+  if(!confirm(`Import ${fresh.length} new song(s) and ${sets.length} setlist(s) from this backup?${skipped?`\n\n${skipped} song(s) are already present and will be skipped.`:""}\n\nYour current songs and setlists are kept.`))return;
   try{
     for(const s of fresh){
       await persistSong({id:s.id,title:s.title,language:s.language,key:s.key,chords:s.chords||"",blob:dataURLToBlob(s.image)});
@@ -903,7 +927,7 @@ async function restore(file){
     if(sets.length)saveSets();
     userSongs=(await dbAll()).map(r=>({...r,url:r.blob?URL.createObjectURL(r.blob):r.imageUrl}));
     refresh();renderSets();
-    msg(`Imported ${fresh.length} song(s) and ${sets.length} setlist(s).`);
+    msg(`Imported ${fresh.length} song(s) and ${sets.length} setlist(s).${skipped?` Skipped ${skipped} already present.`:""}`);
   }catch(e){msg("Could not import the backup.")}
 }
 $("backupBtn").addEventListener("click",backup);
